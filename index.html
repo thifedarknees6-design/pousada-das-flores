@@ -188,6 +188,8 @@ body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;background:var(--bg);color:v
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ter);color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:opacity .3s;z-index:2000;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 <body>
 
@@ -450,6 +452,19 @@ window._pffGetVit=function(){return _0x7g();};
 _0x8h();
 })();
 
+// ══ FIREBASE CONFIG ══
+const firebaseConfig = {
+  apiKey: "AIzaSyAI1fZHK5iMT39PWw_O1iakApvNuWyW4xs",
+  authDomain: "pousada-das-flores.firebaseapp.com",
+  databaseURL: "https://pousada-das-flores-default-rtdb.firebaseio.com",
+  projectId: "pousada-das-flores",
+  storageBucket: "pousada-das-flores.firebasestorage.app",
+  messagingSenderId: "278693788816",
+  appId: "1:278693788816:web:ca2f81b719840a18642c15"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 // ══ DADOS ══
 const QUARTOS_INIT=[
   {id:1,nome:'Suíte 1',tipo:'Suíte com Varanda',preco:250,cap:2,status:'livre',hospede:''},
@@ -462,10 +477,70 @@ const QUARTOS_INIT=[
   {id:8,nome:'Suíte 8',tipo:'Suíte com Varanda',preco:250,cap:2,status:'livre',hospede:''},
   {id:9,nome:'Suíte 9',tipo:'Suíte com Varanda',preco:250,cap:2,status:'livre',hospede:''},
 ];
-let quartos=JSON.parse(localStorage.getItem('pff_q')||'null')||JSON.parse(JSON.stringify(QUARTOS_INIT));
-let reservas=JSON.parse(localStorage.getItem('pff_r')||'[]');
+let quartos=JSON.parse(JSON.stringify(QUARTOS_INIT));
+let reservas=[];
 let qSel=null,telaAtual='painel';
-function salvar(){localStorage.setItem('pff_q',JSON.stringify(quartos));localStorage.setItem('pff_r',JSON.stringify(reservas));}
+let _fbPronto=false;
+
+// ── Salva no Firebase + localStorage (fallback offline) ──
+function salvar(){
+  localStorage.setItem('pff_q',JSON.stringify(quartos));
+  localStorage.setItem('pff_r',JSON.stringify(reservas));
+  if(_fbPronto && typeof firebase!=='undefined'){
+    db.ref('dados').set({quartos:quartos,reservas:reservas,ts:Date.now()})
+      .catch(function(){console.warn('Firebase offline, salvo localmente.');});
+  }
+}
+
+// ── Carrega do Firebase; se offline usa localStorage ──
+function iniciarDados(){
+  document.getElementById('tb-sub').textContent='Sincronizando...';
+  // Verifica se Firebase carregou (pode não ter no primeiro acesso offline)
+  if(typeof firebase==='undefined'||!firebase.database){
+    console.warn('Firebase SDK não disponível, usando dados locais.');
+    var lq=localStorage.getItem('pff_q');
+    var lr=localStorage.getItem('pff_r');
+    if(lq)quartos=JSON.parse(lq); else quartos=JSON.parse(JSON.stringify(QUARTOS_INIT));
+    if(lr)reservas=JSON.parse(lr);
+    _fbPronto=false;
+    renderPainel();
+    return;
+  }
+  db.ref('dados').once('value')
+    .then(function(snap){
+      var d=snap.val();
+      if(d&&d.quartos)quartos=d.quartos;
+      if(d&&d.reservas)reservas=d.reservas;
+      // Salva localmente como cache offline
+      localStorage.setItem('pff_q',JSON.stringify(quartos));
+      localStorage.setItem('pff_r',JSON.stringify(reservas));
+      _fbPronto=true;
+      renderPainel();
+      // Escuta mudanças em tempo real (outro dispositivo salvou)
+      db.ref('dados').on('value',function(snap2){
+        var d2=snap2.val();
+        if(d2&&d2.quartos)quartos=d2.quartos;
+        if(d2&&d2.reservas)reservas=d2.reservas;
+        localStorage.setItem('pff_q',JSON.stringify(quartos));
+        localStorage.setItem('pff_r',JSON.stringify(reservas));
+        // Atualiza a tela atual silenciosamente
+        if(telaAtual==='painel')renderPainel();
+        else if(telaAtual==='mapa')renderMapa();
+        else if(telaAtual==='reservas')renderReservas();
+        else if(telaAtual==='hospedes')renderHospedes();
+      });
+    })
+    .catch(function(){
+      // Sem internet — usa cache local
+      console.warn('Firebase indisponível, usando dados locais.');
+      var lq=localStorage.getItem('pff_q');
+      var lr=localStorage.getItem('pff_r');
+      if(lq)quartos=JSON.parse(lq);
+      if(lr)reservas=JSON.parse(lr);
+      _fbPronto=false;
+      renderPainel();
+    });
+}
 
 // ══ UTILITÁRIOS ══
 function toast(msg,dur=2600){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),dur);}
@@ -813,7 +888,7 @@ function importarBackup(input){
   reader.readAsText(file);input.value='';
 }
 
-renderPainel();
+iniciarDados();
 </script>
 </body>
 </html>
